@@ -1,0 +1,11 @@
+[package]
+name = "switchtube-rs"
+authors = ["Jeremy Stucki"]
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "3.2.21", features = ["derive", "env"] }
+reqwest = { version = "0.11", features = ["blocking", "json"] }
+serde = { version = "1.0.144", features = ["derive"] }
+url = "2.3.1"
