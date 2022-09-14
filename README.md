@@ -11,15 +11,5 @@ cargo install --git https://github.com/jeremystucki/switchtube-rs/
 ## Usage
 
 ```
-USAGE:
-    switchtube-rs <SUBCOMMAND>
-
-OPTIONS:
-    -h, --help       Print help information
-    -V, --version    Print version information
-
-SUBCOMMANDS:
-    download    
-    help        Print this message or the help of the given subcommand(s)
+TOKEN="foo" switchtube-rs download https://tube.switch.ch/channels/abc123
 ```
-
