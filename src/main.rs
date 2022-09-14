@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 use reqwest::blocking::{Client as HttpClient, ClientBuilder as HttpClientBuilder};
 use serde::Deserialize;
-use url::Url;
 use std::collections::VecDeque;
+use url::Url;
 
 const BASE_URL: &str = "https://tube.switch.ch";
 
@@ -65,7 +65,7 @@ fn download_video(http_client: &HttpClient, video: &Video) -> Result<(), ()> {
     let mut content = http_client.get(request_url).send().map_err(|_| ())?;
 
     println!("- saving to file");
-    
+
     let extension = video_variant.media_type.split_once('/').ok_or(())?.1;
     let file_name = format!("{video}.{extension}").replace('/', " - ");
 
@@ -80,12 +80,7 @@ fn download_channel(http_client: &HttpClient, id: &str) {
 
     let request_url = format!("{BASE_URL}/api/v1/browse/channels/{id}/videos");
 
-    let videos: Vec<Video> = http_client
-        .get(request_url)
-        .send()
-        .unwrap()
-        .json()
-        .unwrap();
+    let videos: Vec<Video> = http_client.get(request_url).send().unwrap().json().unwrap();
 
     for video in videos {
         if download_video(http_client, &video).is_err() {
