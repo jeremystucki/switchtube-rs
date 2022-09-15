@@ -1,7 +1,11 @@
 use clap::{Parser, Subcommand};
-use reqwest::blocking::{Client as HttpClient, ClientBuilder as HttpClientBuilder};
+use futures::StreamExt;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use reqwest::{Client as HttpClient, ClientBuilder as HttpClientBuilder};
 use serde::Deserialize;
 use std::collections::VecDeque;
+use std::io::Write;
+use std::process::exit;
 use url::Url;
 
 const BASE_URL: &str = "https://tube.switch.ch";
@@ -42,54 +46,106 @@ enum Command {
     },
 }
 
-fn download_video(http_client: &HttpClient, video: &Video) -> Result<(), ()> {
-    println!("\n{video}");
-    println!("- fetching details");
+fn create_progress_bar(title: String, size: u64) -> ProgressBar {
+    let style = ProgressStyle::with_template("\n{msg}\n[{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
+        .unwrap()
+        .progress_chars("#>-");
 
-    let video_id = &video.id;
-    let request_url = format!("{BASE_URL}/api/v1/browse/videos/{video_id}/video_variants");
+    ProgressBar::new(size).with_message(title).with_style(style)
+}
 
+async fn download_video(
+    http_client: &HttpClient,
+    video: &Video,
+    progress_bar_container: &MultiProgress,
+) -> Result<(), ()> {
     let video_variant = http_client
-        .get(request_url)
+        .get(format!(
+            "{BASE_URL}/api/v1/browse/videos/{}/video_variants",
+            video.id
+        ))
         .send()
+        .await
         .map_err(|_| ())?
         .json::<VecDeque<VideoVariant>>()
+        .await
         .map_err(|_| ())?
         .pop_front()
         .ok_or(())?;
 
-    println!("- downloading video");
+    let response = http_client
+        .get(format!("{BASE_URL}{}", video_variant.path))
+        .send()
+        .await
+        .map_err(|_| ())?;
 
-    let video_variant_path = video_variant.path;
-    let request_url = format!("{BASE_URL}{video_variant_path}");
-    let mut content = http_client.get(request_url).send().map_err(|_| ())?;
-
-    println!("- saving to file");
+    let total_size = response.content_length().ok_or(())?;
+    let progress_bar =
+        progress_bar_container.add(create_progress_bar(video.to_string(), total_size));
 
     let extension = video_variant.media_type.split_once('/').ok_or(())?.1;
     let file_name = format!("{video}.{extension}").replace('/', " - ");
 
     let mut file = std::fs::File::create(file_name).map_err(|_| ())?;
-    std::io::copy(&mut content, &mut file).map_err(|_| ())?;
+    let mut stream = response.bytes_stream();
+
+    while let Some(item) = stream.next().await {
+        let chunk = item.map_err(|_| ())?;
+        file.write_all(&chunk).map_err(|_| ())?;
+        progress_bar.inc(chunk.len().try_into().unwrap());
+    }
 
     Ok(())
 }
 
-fn download_channel(http_client: &HttpClient, id: &str) {
-    println!("Fetching videos in channel");
-
+async fn download_channel(http_client: &HttpClient, id: &str) {
     let request_url = format!("{BASE_URL}/api/v1/browse/channels/{id}/videos");
 
-    let videos: Vec<Video> = http_client.get(request_url).send().unwrap().json().unwrap();
+    let videos: Vec<Video> = http_client
+        .get(request_url)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
 
+    let progress_bar_container = MultiProgress::new();
+
+    let progress_bar = progress_bar_container.add(
+        ProgressBar::new(videos.len().try_into().unwrap()).with_style(
+            ProgressStyle::with_template("Downloading channel\n{wide_bar} {pos}/{len}").unwrap(),
+        ),
+    );
+
+    progress_bar.set_position(0);
+
+    let mut failed_downloads = Vec::new();
     for video in videos {
-        if download_video(http_client, &video).is_err() {
-            println!("- download failed");
+        if download_video(http_client, &video, &progress_bar_container)
+            .await
+            .is_err()
+        {
+            failed_downloads.push(video);
         }
+
+        progress_bar.inc(1);
+    }
+
+    progress_bar.finish_with_message("Download complete");
+
+    if !failed_downloads.is_empty() {
+        println!("The following videos failed to download:\n");
+
+        for video in failed_downloads {
+            println!("{video}");
+        }
+
+        exit(1);
     }
 }
 
-fn download(url: &Url, token: &str) {
+async fn download(url: &Url, token: &str) {
     let mut headers = reqwest::header::HeaderMap::new();
 
     let authorization_header = format!("Token {token}").parse().unwrap();
@@ -104,17 +160,18 @@ fn download(url: &Url, token: &str) {
 
     match path_segments.next() {
         Some("channels") => match path_segments.next() {
-            Some(id) => download_channel(&http_client, id),
+            Some(id) => download_channel(&http_client, id).await,
             None => println!("Not supported"),
         },
         _ => println!("Not supported"),
     }
 }
 
-fn main() {
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Download { url, token } => download(&url, &token),
+        Command::Download { url, token } => download(&url, &token).await,
     }
 }
