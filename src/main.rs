@@ -54,7 +54,7 @@ fn create_progress_bar(title: String, size: u64) -> ProgressBar {
     ProgressBar::new(size).with_message(title).with_style(style)
 }
 
-async fn download_video(
+async fn execute_video_download(
     http_client: &HttpClient,
     video: &Video,
     progress_bar_container: &MultiProgress,
@@ -98,6 +98,24 @@ async fn download_video(
     Ok(())
 }
 
+async fn download_video(http_client: &HttpClient, id: &str) {
+    let request_url = format!("{BASE_URL}/api/v1/browse/videos/{id}");
+
+    let video: Video = http_client
+        .get(request_url)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let progress_bar_container = MultiProgress::new();
+    execute_video_download(http_client, &video, &progress_bar_container)
+        .await
+        .unwrap();
+}
+
 async fn download_channel(http_client: &HttpClient, id: &str) {
     let request_url = format!("{BASE_URL}/api/v1/browse/channels/{id}/videos");
 
@@ -122,7 +140,7 @@ async fn download_channel(http_client: &HttpClient, id: &str) {
 
     let mut failed_downloads = Vec::new();
     for video in videos {
-        if download_video(http_client, &video, &progress_bar_container)
+        if execute_video_download(http_client, &video, &progress_bar_container)
             .await
             .is_err()
         {
@@ -141,7 +159,7 @@ async fn download_channel(http_client: &HttpClient, id: &str) {
             println!("{video}");
         }
 
-        exit(1);
+        exit(1)
     }
 }
 
@@ -161,9 +179,13 @@ async fn download(url: &Url, token: &str) {
     match path_segments.next() {
         Some("channels") => match path_segments.next() {
             Some(id) => download_channel(&http_client, id).await,
-            None => println!("Not supported"),
+            None => panic!("Not supported"),
         },
-        _ => println!("Not supported"),
+        Some("videos") => match path_segments.next() {
+            Some(id) => download_video(&http_client, id).await,
+            None => panic!("Not supported"),
+        },
+        _ => panic!("Not supported"),
     }
 }
 

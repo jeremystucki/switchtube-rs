@@ -5,7 +5,7 @@ A command-line client for tube.switch.ch
 ## Installation
 
 ```
-cargo install --git https://github.com/jeremystucki/switchtube-rs/
+cargo install --force --git https://github.com/jeremystucki/switchtube-rs/
 ```
 
 ## Usage
